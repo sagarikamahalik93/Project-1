@@ -1,0 +1,133 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pulsar-config
+  namespace: default
+data:
+  standalone.conf: |
+    brokerServicePort=6650
+    webServicePort=8080
+    clusterName=standalone
+    zookeeperServers=localhost:2181
+    configurationStoreServers=localhost:2181
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: pulsar
+  namespace: default
+  labels:
+    app: pulsar
+spec:
+  serviceName: pulsar-broker
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pulsar
+  template:
+    metadata:
+      labels:
+        app: pulsar
+    spec:
+      containers:
+      - name: pulsar
+        image: apachepulsar/pulsar:latest
+        command:
+        - sh
+        - -c
+        args:
+        - bin/pulsar standalone
+        ports:
+        - name: broker
+          containerPort: 6650
+          protocol: TCP
+        - name: web
+          containerPort: 8080
+          protocol: TCP
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        volumeMounts:
+        - name: pulsar-data
+          mountPath: /pulsar/data
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        livenessProbe:
+          tcpSocket:
+            port: 6650
+          initialDelaySeconds: 60
+          periodSeconds: 10
+      
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - pulsar
+              topologyKey: kubernetes.io/hostname
+  
+  volumeClaimTemplates:
+  - metadata:
+      name: pulsar-data
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 5Gi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pulsar-broker
+  namespace: default
+  labels:
+    app: pulsar
+spec:
+  clusterIP: None
+  selector:
+    app: pulsar
+  ports:
+  - name: broker
+    port: 6650
+    targetPort: 6650
+  - name: web
+    port: 8080
+    targetPort: 8080
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pulsar-broker-headless
+  namespace: default
+  labels:
+    app: pulsar
+spec:
+  type: ClusterIP
+  selector:
+    app: pulsar
+  ports:
+  - name: broker
+    port: 6650
+    targetPort: 6650
+  - name: web
+    port: 8080
+    targetPort: 8080
